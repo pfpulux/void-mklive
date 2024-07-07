@@ -39,7 +39,7 @@ USERGROUPS_DONE=
 USERACCOUNT_DONE=
 BOOTLOADER_DONE=
 PARTITIONS_DONE=
-LUKS_DONE=
+ENC_DONE=
 LVM_DONE=
 NETWORK_DONE=
 FILESYSTEMS_DONE=
@@ -460,6 +460,7 @@ menu_filesystems() {
         dev=$(cat $ANSWER)
         DIALOG --title " Select the filesystem type for $dev " \
             --menu "$MENULABEL" ${MENUSIZE} \
+            "bcachefs" "Linux bcachefs" \
             "btrfs" "Oracle's Btrfs" \
             "ext2" "Linux ext2 (no journaling)" \
             "ext3" "Linux ext3 (journal)" \
@@ -475,16 +476,16 @@ menu_filesystems() {
         fi
         if [ "$fstype" != "swap" ]; then
             # luks and lvm the dev for / is not the partition
-            if [ "$(get_option USELUKS)" = "0" ] && [ "$(get_option USELVM)" = "0" ]; then
+            if [ "$(get_option USEENC)" = "0" ] && [ "$(get_option USELVM)" = "0" ]; then
                 DIALOG --inputbox "Please specify the mount point for $dev:" ${INPUTSIZE}
             else
-                if [ "$(get_option USELUKS)" = "0" ] && [ "$(get_option USELVM)" = "1" ]; then
+                if [ "$(get_option USEENC)" = "0" ] && [ "$(get_option USELVM)" = "1" ]; then
                     DIALOG --inputbox "only / will be in LVM\nPlease specify the mount point for $dev:" ${INPUTSIZE}
                 else
-                    if [ "$(get_option USELUKS)" = "1" ] && [ "$(get_option USELVM)" = "0" ]; then
-                        DIALOG --inputbox "only / will be LUKS encrypted\nPlease specify the mount point for $dev:" ${INPUTSIZE}
+                    if [ "$(get_option USEENC)" = "1" ] && [ "$(get_option USELVM)" = "0" ]; then
+                        DIALOG --inputbox "only / will be encrypted\nPlease specify the mount point for $dev:" ${INPUTSIZE}
                     else
-                        DIALOG --inputbox "LVM will be LUKS encrypted and only / will be in LVM\nPlease specify the mount point for $dev:" ${INPUTSIZE}
+                        DIALOG --inputbox "LVM will be encrypted and only / will be in LVM\nPlease specify the mount point for $dev:" ${INPUTSIZE}
                     fi
                 fi
             fi
@@ -498,17 +499,20 @@ menu_filesystems() {
         fi
         if [ $mntpoint = '/' ]; then
             deve=$dev
-            if [ "$(get_option USELUKS)" = "0" ] && [ "$(get_option USELVM)" = "0" ]; then
+            if [ "$(get_option USEENC)" = "0" ] && [ "$(get_option USELVM)" = "0" ]; then
                 deve=$dev
             fi
-            if [ "$(get_option USELUKS)" = "1" ] && [ "$(get_option USELVM)" = "1" ]; then
+            if [ "$(get_option USEENC)" = "1" ] && [ "$(get_option USELVM)" = "1" ]; then
                 deve="/dev/mapper/lpool-crootl"
             fi
-            if [ "$(get_option USELUKS)" = "1" ] && [ "$(get_option USELVM)" = "0" ]; then
+            if [ "$(get_option USEENC)" = "1" ] && [ "$(get_option USELVM)" = "0" ]; then
                 deve="/dev/mapper/croot"
             fi
-            if [ "$(get_option USELUKS)" = "0" ] && [ "$(get_option USELVM)" = "1" ]; then
+            if [ "$(get_option USEENC)" = "0" ] && [ "$(get_option USELVM)" = "1" ]; then
                 deve="/dev/mapper/lpool-rootl"
+            fi
+            if [ "$(get_option USEENC)" = "1" ] && [ "$(get_option USBCACHEFS)" = "1" ]; then
+                deve=$dev
             fi
         else
             deve=$dev
@@ -889,18 +893,18 @@ menu_luks() {
     while true; do
         DIALOG --yesno "Use a unencrypted filesystem?" ${YESNOSIZE}
         if [ $? -eq 0 ]; then
-            set_option USELUKS 0
-            LUKS_DONE=1
+            set_option USEENC 0
+            ENC_DONE=1
             break
         elif [ $? -eq 1 ]; then
-            set_option USELUKS 1
+            set_option USEENC 1
             break
         fi
     done
-    if [ "$(get_option USELUKS)" = "1" ]; then
+    if [ "$(get_option USEENC)" = "1" ]; then
         while true; do
             if [ -z "${_firstpass}" ]; then
-                _desc="Enter the LUKS passphrase"
+                _desc="Enter the encryption passphrase"
             else
                 _desc="$_desc again"
             fi
@@ -917,13 +921,13 @@ menu_luks() {
                         unset _firstpass _secondpass
                         sleep 2 && clear && continue
                     fi
-                    set_option LUKSPASSWORD "LUKS${_firstpass}"
-                    LUKS_DONE=1
+                    set_option ENCPASSWORD "ENC${_firstpass}"
+                    ENC_DONE=1
                     DIALOG --msgbox "You need in addition to / an uncrypted /boot partition!" ${MSGBOXSIZE}
                     break
                 fi
             else
-                set_option USELUKS 0
+                set_option USEENC 0
                 return
             fi
         done
@@ -1161,14 +1165,22 @@ validate_filesystems() {
         if [ -z "$TARGETFS" ]; then
             TARGETFS="${fmt}$dev ($size) mounted on $mntpt as ${fstype}\n"
         else
-            if [ "$(get_option USELUKS)" = "0" ] && [ "$(get_option USELVM)" = "0" ]; then
+            if [ "$(get_option USEENC)" = "0" ] && [ "$(get_option USELVM)" = "0" ]; then
                 TARGETFS="${TARGETFS}${fmt}${dev} ($size) mounted on $mntpt as ${fstype}\n"
             fi
-            if [ "$(get_option USELUKS)" = "1" ] && [ "$(get_option USELVM)" = "0" ]; then
-                if [ "$mntpt" = "/" ]; then
-                    TARGETFS="${TARGETFS}${fmt}${dev} via LUKS ($size) mounted on $mntpt as ${fstype}\n"
+            if [ "$(get_option USEENC)" = "1" ] && [ "$(get_option USELVM)" = "0" ]; then
+                if [ "$(get_option USEBCACHEFS)" = "0" ]; then
+                    if [ "$mntpt" = "/" ]; then
+                        TARGETFS="${TARGETFS}${fmt}${dev} via LUKS ($size) mounted on $mntpt as ${fstype}\n"
+                    else
+                        TARGETFS="${TARGETFS}${fmt}${dev} ($size) mounted on $mntpt as ${fstype}\n"
+                    fi
                 else
-                    TARGETFS="${TARGETFS}${fmt}${dev} ($size) mounted on $mntpt as ${fstype}\n"
+                    if [ "$mntpt" = "/" ]; then
+                        TARGETFS="${TARGETFS}${fmt}${dev} via encrypted bcachefs ($size) mounted on $mntpt as ${fstype}\n"
+                    else
+                        TARGETFS="${TARGETFS}${fmt}${dev} ($size) mounted on $mntpt as ${fstype}\n"
+                    fi
                 fi
             fi
             fsi=$((${#size}-1))
@@ -1177,14 +1189,14 @@ validate_filesystems() {
             if [ $(a_lt_b $fsf $LVMMAXROOT) = 1 ] && [ "$mntpt" = "/" ]; then
                 size="limited to ${LVMMAXROOT}G from $size"
             fi
-            if [ "$(get_option USELUKS)" = "0" ] && [ "$(get_option USELVM)" = "1" ]; then
+            if [ "$(get_option USEENC)" = "0" ] && [ "$(get_option USELVM)" = "1" ]; then
                 if [ "$mntpt" = "/" ]; then
                     TARGETFS="${TARGETFS}${fmt}${dev} via LVM ($size) mounted on $mntpt as ${fstype}\n"
                 else
                     TARGETFS="${TARGETFS}${fmt}${dev} ($size) mounted on $mntpt as ${fstype}\n"
                 fi
             fi
-            if [ "$(get_option USELUKS)" = "1" ] && [ "$(get_option USELVM)" = "1" ]; then
+            if [ "$(get_option USEENC)" = "1" ] && [ "$(get_option USELVM)" = "1" ]; then
                 if [ "$mntpt" = "/" ]; then
                     TARGETFS="${TARGETFS}${fmt}${dev} via LUKS+LVM ($size) mounted on $mntpt as ${fstype}\n"
                 else
@@ -1242,8 +1254,12 @@ failed to activate swap on $dev!\ncheck $LOG for errors." ${MSGBOXSIZE}
             continue
         fi
 
+        if [ "$fstype" = "bcachefs" ]; then
+            set_option USEBCACHEFS 1
+        fi
         if [ "$mkfs" -eq 1 ]; then
             case "$fstype" in
+            bcachefs) MKFS="bcachefs format -f --compression=lz4"; modprobe bcachefs >$LOG 2>&1;;
             btrfs) MKFS="mkfs.btrfs -f"; modprobe btrfs >$LOG 2>&1;;
             ext2) MKFS="mke2fs -F"; modprobe ext2 >$LOG 2>&1;;
             ext3) MKFS="mke2fs -F -j"; modprobe ext3 >$LOG 2>&1;;
@@ -1253,10 +1269,10 @@ failed to activate swap on $dev!\ncheck $LOG for errors." ${MSGBOXSIZE}
             xfs) MKFS="mkfs.xfs -f -i sparse=0"; modprobe xfs >$LOG 2>&1;;
             esac
             TITLE="Check $LOG for details ..."
-            if [ "$(get_option USELUKS)" = "1" ] && [ "$mntpt" = "/" ] && [ "$(get_option USELVM)" = "0" ];  then
+            if [ "$(get_option USEENC)" = "1" ] && [ "$mntpt" = "/" ] && [ "$(get_option USELVM)" = "0" ] && [ ! "$(get_option USEBCACHEFS)" = "1" ];  then
                 INFOBOX "Preparing LUKS on $dev" 6 60
-                printf %s "$(get_option LUKSPASSWORD)"| sed 's/^LUKS//' | cryptsetup luksFormat "$dev" --key-file=- >$LOG 2>&1
-                printf %s "$(get_option LUKSPASSWORD)"| sed 's/^LUKS//' | cryptsetup luksOpen "$dev" croot --key-file=- >$LOG 2>&1
+                printf %s "$(get_option ENCPASSWORD)"| sed 's/^ENC//' | cryptsetup luksFormat "$dev" --key-file=- >$LOG 2>&1
+                printf %s "$(get_option ENCPASSWORD)"| sed 's/^ENC//' | cryptsetup luksOpen "$dev" croot --key-file=- >$LOG 2>&1
                 if [ $? -ne 0 ]; then
                     DIALOG --msgbox "${BOLD}${RED}ERROR:${RESET} \
 failed prepare LUKS $dev on ${mntpt}! check $LOG for errors." ${MSGBOXSIZE}
@@ -1264,10 +1280,10 @@ failed prepare LUKS $dev on ${mntpt}! check $LOG for errors." ${MSGBOXSIZE}
                 fi
                 dev=$deve
             fi
-            if [ "$(get_option USELUKS)" = "1" ] && [ "$mntpt" = "/" ] && [ "$(get_option USELVM)" = "1" ];  then
+            if [ "$(get_option USEENC)" = "1" ] && [ "$mntpt" = "/" ] && [ "$(get_option USELVM)" = "1" ] && [ ! "$(get_option USEBCACHEFS)" = "1" ];  then
                 INFOBOX "Preparing LUKS and LVM on $dev" 6 60
-                printf %s "$(get_option LUKSPASSWORD)"| sed 's/^LUKS//' | cryptsetup luksFormat "$dev" --key-file=- >$LOG 2>&1
-                printf %s "$(get_option LUKSPASSWORD)"| sed 's/^LUKS//' | cryptsetup luksOpen "$dev" cpool --key-file=- >$LOG 2>&1
+                printf %s "$(get_option ENCPASSWORD)"| sed 's/^ENC//' | cryptsetup luksFormat "$dev" --key-file=- >$LOG 2>&1
+                printf %s "$(get_option ENCPASSWORD)"| sed 's/^ENC//' | cryptsetup luksOpen "$dev" cpool --key-file=- >$LOG 2>&1
                 if [ $? -ne 0 ]; then
                     DIALOG --msgbox "${BOLD}${RED}ERROR:${RESET} \
 failed prepare LUKS $dev on ${mntpt}! check $LOG for errors." ${MSGBOXSIZE}
@@ -1290,7 +1306,7 @@ failed prepare LVM $dev on ${mntpt}! check $LOG for errors." ${MSGBOXSIZE}
                 # dev=/dev/mapper/crootl
                 dev=$deve
             fi
-            if [ "$(get_option USELUKS)" = "0" ] && [ "$mntpt" = "/" ] && [ "$(get_option USELVM)" = "1" ];  then
+            if [ "$(get_option USEENC)" = "0" ] && [ "$mntpt" = "/" ] && [ "$(get_option USELVM)" = "1" ];  then
                 INFOBOX "Preparing LVM on $dev" 6 60
                 vgcreate lpool $dev
                 fsi=$((${#fssize}-1))
@@ -1310,8 +1326,12 @@ failed prepare LVM $dev on ${mntpt}! check $LOG for errors." ${MSGBOXSIZE}
                 dev=$deve
             fi
             INFOBOX "Creating filesystem $fstype on $dev for $mntpt ..." 6 60
-            echo "Running $MKFS $dev..." >$LOG
-            $MKFS $dev >$LOG 2>&1; rv=$?
+            echo "Running $MKFS $dev ..." >$LOG
+            if [ "$(get_option USEBCACHEFS)" = "1" ] && [ "$(get_option USEENC)" = "1" ] && [ "$mntpt" = "/" ]; then
+                printf %s "$(get_option ENCPASSWORD)"| sed 's/^ENC//' | $MKFS --encrypted "$dev" >$LOG 2>&1; rv=$?
+            else
+                $MKFS $dev >$LOG 2>&1; rv=$?
+            fi
             if [ $rv -ne 0 ]; then
                 DIALOG --msgbox "${BOLD}${RED}ERROR:${RESET} \
 failed to create filesystem $fstype on $dev!\ncheck $LOG for errors." ${MSGBOXSIZE}
@@ -1321,8 +1341,12 @@ failed to create filesystem $fstype on $dev!\ncheck $LOG for errors." ${MSGBOXSI
         # Mount rootfs the first one.
         [ "$mntpt" != "/" ] && continue
         mkdir -p $TARGETDIR
-        echo "Mounting $dev on $mntpt ($fstype)..." >$LOG
-        mount -t $fstype $dev $TARGETDIR >$LOG 2>&1
+        echo "Mounting $dev on $TARGETDIR for $mntpt ($fstype)..." >$LOG
+        if [ "$(get_option USEBCACHEFS)" = "1" ] && [ "$(get_option USEENC)" = "1" ]; then
+            printf %s "$(get_option ENCPASSWORD)"| sed 's/^ENC//' | mount -t $fstype $dev $TARGETDIR >$LOG 2>&1
+        else
+            mount -t $fstype $dev $TARGETDIR >$LOG 2>&1
+        fi
         if [ $? -ne 0 ]; then
             DIALOG --msgbox "${BOLD}${RED}ERROR:${RESET} \
 failed to mount $dev on ${mntpt}! check $LOG for errors." ${MSGBOXSIZE}
@@ -1344,13 +1368,13 @@ failed to mount $dev on ${mntpt}! check $LOG for errors." ${MSGBOXSIZE}
     while [ $# -ne 0 ]; do
         dev=$2; fstype=$3; fssize=$4; mntpt="$5"; mkfs=$6; deve=$7
         shift 7
-        if [ "$(get_option USELUKS)" = "1" ] && [ "$(get_options USELVM)" = "0" ]; then
+        if [ "$(get_option USEENC)" = "1" ] && [ "$(get_options USELVM)" = "0" ]; then
             dev=$deve
         fi
-        if [ "$(get_option USELUKS)" = "1" ] && [ "$(get_options USELVM)" = "1" ]; then
+        if [ "$(get_option USEENC)" = "1" ] && [ "$(get_options USELVM)" = "1" ]; then
             dev=/dev/mapper/lpool-crootl
         fi
-        if [ "$(get_option USELUKS)" = "0" ] && [ "$(get_options USELVM)" = "1" ]; then
+        if [ "$(get_option USEENC)" = "0" ] && [ "$(get_options USELVM)" = "1" ]; then
             dev=/dev/mapper/lpool-rootl
         fi
 
@@ -1631,7 +1655,7 @@ ${BOLD}Do you want to continue?${RESET}" 20 80 || return
     fi
 
     # handle encrypted issues
-    if [ "$(get_option USELUKS)" = "1" ]; then
+    if [ "$(get_option USEENC)" = "1" ] || [ "$(get_option USEBCACHEFS)" = "1" ]; then
         echo "hostonly=yes" > $TARGETDIR/etc/dracut.conf.d/hostonly.conf
         SSF=$TARGETDIR/usr/share/void-artwork/splash.png
         SDF=$TARGETDIR/boot/splash.png
@@ -1759,7 +1783,7 @@ menu() {
                && DEFITEM="BootLoader";;
         "BootLoader") menu_bootloader && [ -n "$BOOTLOADER_DONE" ] && DEFITEM="Lvm";;
         "Lvm") menu_lvm && [ -n "$LVM_DONE" ] && DEFITEM="Encryption";;
-        "Encryption") menu_luks && [ -n "$LUKS_DONE" ] && DEFITEM="Partition";;
+        "Encryption") menu_luks && [ -n "$ENC_DONE" ] && DEFITEM="Partition";;
         "Partition") menu_partitions && [ -n "$PARTITIONS_DONE" ] && DEFITEM="Filesystems";;
         "Filesystems") menu_filesystems && [ -n "$FILESYSTEMS_DONE" ] && DEFITEM="Install";;
         "Install") menu_install;;

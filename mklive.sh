@@ -28,7 +28,7 @@ umask 022
 
 . ./lib.sh
 
-readonly REQUIRED_PKGS="base-files libgcc dash coreutils sed tar gawk syslinux grub-i386-efi grub-x86_64-efi memtest86+ squashfs-tools xorriso"
+readonly REQUIRED_PKGS="base-files libgcc dash coreutils sed tar gawk syslinux grub-i386-efi grub-x86_64-efi memtest86+ squashfs-tools xorriso keyutils"
 readonly INITRAMFS_PKGS="binutils xz device-mapper dhclient dracut-network openresolv"
 readonly PROGNAME=$(basename "$0")
 declare -a INCLUDE_DIRS=()
@@ -73,7 +73,7 @@ usage() {
 	to a CD/DVD-ROM or any USB stick.
 
 	To generate a more complete live ISO image, use build-x86-images.sh.
-	
+
 	OPTIONS
 	 -a <arch>          Set XBPS_ARCH in the ISO image
 	 -b <system-pkg>    Set an alternative base package (default: base-system)
@@ -101,6 +101,10 @@ usage() {
 copy_void_keys() {
     mkdir -p "$1"/var/db/xbps/keys
     cp keys/*.plist "$1"/var/db/xbps/keys
+}
+
+copy_dracut_bcachefs_helper() {
+    cp -r dracut/90bcachefs "$1"/usr/lib/dracut/modules.d/
 }
 
 copy_dracut_files() {
@@ -171,6 +175,7 @@ generate_initramfs() {
     local _args
 
     copy_dracut_files "$ROOTFS"
+    copy_dracut_bcachefs_helper "$ROOTFS"
     copy_autoinstaller_files "$ROOTFS"
     chroot "$ROOTFS" env -i /usr/bin/dracut -N --"${INITRAMFS_COMPRESSION}" \
         --add-drivers "ahci" --force-add "vmklive autoinstaller" --omit systemd "/boot/initrd" $KERNELVERSION
@@ -284,6 +289,7 @@ generate_squashfs() {
     mkdir -p "$BUILDDIR/tmp-rootfs"
     mkfs.ext3 -F -m1 "$BUILDDIR/tmp/LiveOS/ext3fs.img" >/dev/null 2>&1
     mount -o loop "$BUILDDIR/tmp/LiveOS/ext3fs.img" "$BUILDDIR/tmp-rootfs"
+    # copy_dracut_bcachefs_helper "$ROOTFS"
     cp -a "$ROOTFS"/* "$BUILDDIR"/tmp-rootfs/
     umount -f "$BUILDDIR/tmp-rootfs"
     mkdir -p "$IMAGEDIR/LiveOS"
