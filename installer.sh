@@ -887,7 +887,7 @@ failed to run grub-mkconfig!\nCheck $LOG for errors." ${MSGBOXSIZE}
     fi
 }
 
-menu_luks() {
+menu_enc() {
     local _firstpass _secondpass _desc
 
     while true; do
@@ -1783,7 +1783,7 @@ menu() {
                && DEFITEM="BootLoader";;
         "BootLoader") menu_bootloader && [ -n "$BOOTLOADER_DONE" ] && DEFITEM="Lvm";;
         "Lvm") menu_lvm && [ -n "$LVM_DONE" ] && DEFITEM="Encryption";;
-        "Encryption") menu_luks && [ -n "$ENC_DONE" ] && DEFITEM="Partition";;
+        "Encryption") menu_enc && [ -n "$ENC_DONE" ] && DEFITEM="Partition";;
         "Partition") menu_partitions && [ -n "$PARTITIONS_DONE" ] && DEFITEM="Filesystems";;
         "Filesystems") menu_filesystems && [ -n "$FILESYSTEMS_DONE" ] && DEFITEM="Install";;
         "Install") menu_install;;
